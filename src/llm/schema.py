@@ -1,4 +1,5 @@
 from pydantic import BaseModel
+from typing import Any, Literal
 
 
 class LoadedInstanceConfig(BaseModel):
@@ -40,6 +41,20 @@ class Usage(BaseModel):
 class LLMCompletionsRes(BaseModel):
     choices: list[Choice]
     usage: Usage
+
+class FunctionParameters(BaseModel):
+    type: Literal['object']
+    properties: dict[str, Any]
+    required: list[str] | None = None
+
+class ToolSchemaFunction(BaseModel):
+    name: str
+    description: str
+    parameters: FunctionParameters
+
+class ToolSchema(BaseModel):
+    type: Literal['function']
+    function: ToolSchemaFunction
 
 '''
 {

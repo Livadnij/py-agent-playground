@@ -7,13 +7,15 @@ from src.config import settings
 from src.llm.transport import post
 from src.llm.client import LLMClient
 from src.llm.prompts import system_prompt
+from src.tools.runner import tool_runner
 from src.utils import paint
+from src.tools.basic import get_current_time_schema
 
 async def main():
 
     headers = {'Authorization': 'Bearer ' + settings.LLM_API_KEY}
     async with httpx.AsyncClient(headers=headers, base_url= settings.LLM_BASE_URL, timeout=settings.LLM_TIMEOUT) as client:
-        llm_client = await LLMClient.create(client, settings.LLM_MODEL, system_prompt)
+        llm_client = await LLMClient.create(client, settings.LLM_MODEL, system_prompt, [get_current_time_schema], tool_runner)
         print("write '/exit' or Ctrl + C to stop")
 
         while True:

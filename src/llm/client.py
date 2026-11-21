@@ -1,12 +1,13 @@
 import logging
 
 import httpx
-from typing import Optional, List
+from typing import Optional, List, Any
 from src.llm.transport import post, get
 from src.llm.schema import LLMModel, LLMCompletionsRes
 from src.llm.prompts import summary_prompt, summary_marker
 from src.config import settings
 from src.utils import paint
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
 
@@ -16,14 +17,33 @@ class ChatResult:
     tokens_used: int
     usage_percent: float
 
+def format_message(item: dict) -> str:
+    role = item['role']
+    content = item.get('content') or ''
+
+    if role == 'tool':
+        return f'tool result : {content}'
+
+    tool_calls = item.get('tool_calls')
+    if tool_calls:
+        calls = ', '.join(
+            f"{call['function']['name']}({call['function']['arguments']})"
+            for call in tool_calls
+        )
+        return f'assistant called tools : {calls}'
+
+    return f'{role} : {content}'
+
 class LLMClient:
-    def __init__(self, client: httpx.AsyncClient, model_key: str, system_prompt: str):
+    def __init__(self, client: httpx.AsyncClient, model_key: str, system_prompt: str, tools: list[dict[str, Any]] | None = None, tool_runner: Callable[[str, str], Awaitable[str]] | None = None ):
         self.client = client
         self.model: Optional[LLMModel] = None 
         self.model_key = model_key
         self.system_prompt = system_prompt
         self.summary: Optional[str] = None
         self.history: List[dict[str, str]] = []
+        self.tools = tools
+        self.tool_runner = tool_runner
 
 
     async def _load_model_info(self):
@@ -44,18 +64,22 @@ class LLMClient:
         print (paint('Conversation compacting has begun', 'yellow'))
 
         summary_content = self.summary or ""
-
         history_len = len(self.history)
-        history_first_half = self.history[: history_len // 2]
-        history_second_half = self.history[history_len // 2 :]
+        history_mid = history_len // 2
 
-        if (history_second_half[0]['role'] == 'assistant'):
-            history_second_half_first_el = history_second_half.pop(0)
-            history_first_half.append(history_second_half_first_el)
+        cut_index : int
 
-        history_lines_list = [f'{item['role']} : {item['content']}' for item in history_first_half]
+        for i, item in enumerate(self.history[history_mid:], start=history_mid):
+            if item['role'] == 'user':
+                cut_index = i
+                break
+            elif i == history_len - 1 :
+                cut_index = history_len
 
-        history_transcript = '\n'.join(history_lines_list)
+        history_first_half = self.history[: cut_index]
+        history_second_half = self.history[cut_index :]
+
+        history_transcript = '\n'.join(format_message(item) for item in history_first_half)
 
         messages = [
             {'role': 'system', 'content': summary_prompt}
@@ -102,24 +126,51 @@ class LLMClient:
             )
     
         messages = []
+
         if full_system_prompt:
             messages.append({'role': 'system', 'content': full_system_prompt})
         messages.extend(self.history)
+       
+        temp_messages = []
         user_message = {'role': 'user', 'content': message}
-        messages.append(user_message)
+        temp_messages.append(user_message)
 
-        body = {
-            'model': self.model_key, 
-            'messages': messages,
-            'temperature' : settings.LLM_COMPLETION_TEMPERATURE
-        }
+        iteration = 0
 
-        response_raw = await post(self.client, "/v1/chat/completions", body)
+        while iteration <= settings.LLM_MAX_TOOL_ROUNDS:
+            body = {
+                'model': self.model_key,
+                'messages': [*messages, *temp_messages],
+                'temperature': settings.LLM_COMPLETION_TEMPERATURE,
+            }
+
+            if self.tools:
+                body['tools'] = self.tools
+
+            response_raw = await post(self.client, "/v1/chat/completions", body)
+            res_message = response_raw['choices'][0]['message'].get('content')
+            tool_calls = response_raw['choices'][0]['message'].get('tool_calls')
+
+            if not tool_calls:
+                temp_messages.append({'role': 'assistant', 'content': res_message})
+                break
+
+            temp_messages.append({'role': 'assistant', 'content': res_message, 'tool_calls': tool_calls})
+
+            for call in tool_calls:
+                tool_result = await self.tool_runner(call['function']['name'], call['function']['arguments'])
+                temp_messages.append({'role': 'tool', 'tool_call_id': call['id'], 'content': tool_result})
+
+            iteration += 1
+        else:
+            raise ValueError('Tool round limit reached without a final answer')
+
+        self.history.extend(temp_messages)
+
+        
+        self.history.extend(temp_messages)
+
         response = LLMCompletionsRes.model_validate(response_raw)
-        res_message = response.choices[0].message.content
-
-        self.history.append(user_message)
-        self.history.append({'role': 'assistant', 'content': res_message})
 
         if len(self.model.loaded_instances) == 0:
             await self._load_model_info()
@@ -139,7 +190,7 @@ class LLMClient:
 
     
     @classmethod
-    async def create(cls, client, model_key, system_prompt):
-        self = cls(client, model_key, system_prompt)
+    async def create(cls, client, model_key, system_prompt, tools, tool_runner):
+        self = cls(client, model_key, system_prompt, tools, tool_runner)
         await self._load_model_info()
         return self

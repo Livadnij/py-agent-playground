@@ -5,6 +5,7 @@ An experimental terminal chat client for locally hosted language models, built a
 ## Features
 
 - Multi-turn chat in the terminal with full conversation history
+- Tool calling. The model can request tools, the client runs them and returns the results to the model, with a configurable limit on rounds per reply
 - Automatic context compaction. When the conversation fills a configurable share of the loaded context window, the older half of the history is summarized by the model and replaced with that summary
 - Token usage printed after every reply, colored by how full the context is
 - Slash commands for inspecting and controlling the session
@@ -14,6 +15,8 @@ An experimental terminal chat client for locally hosted language models, built a
 ## How it works
 
 Every request to the chat completions endpoint carries the system prompt, the current summary if there is one, the recent history and the new message. After each reply the client works out how much of the loaded context is used. When that crosses the threshold, it calls the model again with a summarizer prompt. The new summary is merged with any previous one, stored separately from the history, and added to the system message on later requests. The context length is read from LM Studio's native models endpoint, so the model has to be loaded.
+
+When tools are provided, their schemas are sent with every request. If a reply asks for tool calls, the client runs each one through a tool runner, appends the assistant message and the tool results, and sends the request again. This repeats until the model answers without asking for a tool or the round limit is reached. A turn is added to the history only after it ends with a final answer, and compaction always cuts the history at a user message, so a tool exchange is never split.
 
 ## Requirements
 
@@ -27,7 +30,7 @@ Every request to the chat completions endpoint carries the system prompt, the cu
 uv sync
 ```
 
-Create a `.env` file in the project root. The values below are examples.
+Copy `.env.example` to `.env` in the project root and fill in the values. The values below are examples.
 
 ```
 LLM_MODEL=google/gemma-4-e4b
@@ -48,6 +51,7 @@ Optional settings and their defaults.
 | LLM_SUMMARY_MAX_TOKENS        | 2000    | Token limit for the summarizing request  |
 | LLM_SUMMARY_TEMPERATURE       | 0.2     | Temperature used for summaries           |
 | LLM_COMPLETION_TEMPERATURE    | 0.7     | Temperature used for normal replies      |
+| LLM_MAX_TOOL_ROUNDS           | 10      | Maximum tool rounds in a single reply    |
 
 ## Usage
 
@@ -80,4 +84,7 @@ src/
     transport.py     thin async GET and POST helpers on httpx
     schema.py        pydantic models for LM Studio responses
     prompts.py       system, summarizer and summary marker prompts
+  tools/
+    basic.py         simple built-in tools and their schemas
+    runner.py        executes a tool call by name
 ```
