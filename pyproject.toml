@@ -1,0 +1,10 @@
+[project]
+name = "py-agent-playground"
+version = "0.1.0"
+description = "A terminal chat client for locally hosted language models"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "httpx>=0.28.1",
+    "pydantic-settings>=2.16.3",
+]
