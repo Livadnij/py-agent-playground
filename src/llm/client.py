@@ -2,11 +2,11 @@ import logging
 
 import httpx
 from typing import Optional, List, Any
+from src.config import Settings
 from src.llm.transport import post, get
 from src.llm.schema import LLMModel, LLMCompletionsRes
 from src.llm.prompts import summary_prompt, summary_marker
-from src.config import settings
-from src.utils import paint
+from src.utils import format_message, paint
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
@@ -17,25 +17,16 @@ class ChatResult:
     tokens_used: int
     usage_percent: float
 
-def format_message(item: dict) -> str:
-    role = item['role']
-    content = item.get('content') or ''
-
-    if role == 'tool':
-        return f'tool result : {content}'
-
-    tool_calls = item.get('tool_calls')
-    if tool_calls:
-        calls = ', '.join(
-            f"{call['function']['name']}({call['function']['arguments']})"
-            for call in tool_calls
-        )
-        return f'assistant called tools : {calls}'
-
-    return f'{role} : {content}'
-
 class LLMClient:
-    def __init__(self, client: httpx.AsyncClient, model_key: str, system_prompt: str, tools: list[dict[str, Any]] | None = None, tool_runner: Callable[[str, str], Awaitable[str]] | None = None ):
+    def __init__(
+            self, 
+            client: httpx.AsyncClient, 
+            model_key: str, 
+            system_prompt: str, 
+            settings : Settings,
+            tools: list[dict[str, Any]] | None = None, 
+            tool_runner: Callable[[list[dict[str, Any]], str, str], Awaitable[str]] | None = None,
+            ):
         self.client = client
         self.model: Optional[LLMModel] = None 
         self.model_key = model_key
@@ -44,6 +35,7 @@ class LLMClient:
         self.history: List[dict[str, str]] = []
         self.tools = tools
         self.tool_runner = tool_runner
+        self.settings = settings
 
 
     async def _load_model_info(self):
@@ -94,8 +86,8 @@ class LLMClient:
         body = {
             'model': self.model_key, 
             'messages': messages,
-            'max_tokens' : settings.LLM_SUMMARY_MAX_TOKENS,
-            'temperature' : settings.LLM_SUMMARY_TEMPERATURE
+            'max_tokens' : self.settings.LLM_SUMMARY_MAX_TOKENS,
+            'temperature' : self.settings.LLM_SUMMARY_TEMPERATURE
         }
 
         response_raw = await post(self.client, "/v1/chat/completions", body)
@@ -137,11 +129,11 @@ class LLMClient:
 
         iteration = 0
 
-        while iteration <= settings.LLM_MAX_TOOL_ROUNDS:
+        while iteration <= self.settings.LLM_MAX_TOOL_ROUNDS:
             body = {
                 'model': self.model_key,
                 'messages': [*messages, *temp_messages],
-                'temperature': settings.LLM_COMPLETION_TEMPERATURE,
+                'temperature': self.settings.LLM_COMPLETION_TEMPERATURE,
             }
 
             if self.tools:
@@ -158,7 +150,7 @@ class LLMClient:
             temp_messages.append({'role': 'assistant', 'content': res_message, 'tool_calls': tool_calls})
 
             for call in tool_calls:
-                tool_result = await self.tool_runner(call['function']['name'], call['function']['arguments'])
+                tool_result = await self.tool_runner(self.tools, call['function']['name'], call['function']['arguments'])
                 temp_messages.append({'role': 'tool', 'tool_call_id': call['id'], 'content': tool_result})
 
             iteration += 1
@@ -177,17 +169,17 @@ class LLMClient:
         tokens_used = response.usage.prompt_tokens + response.usage.completion_tokens - response.usage.completion_tokens_details.reasoning_tokens
         usage_percent =  tokens_used * 100 / self.model.loaded_instances[0].config.context_length
 
-        if(usage_percent >= settings.LLM_SUMMARY_THRESHOLD_PERCENT):
+        if(usage_percent >= self.settings.LLM_SUMMARY_THRESHOLD_PERCENT):
             try:
                 await self.compact()
-            except Exception:
-                logging.exception('Compaction failed, history was left unchanged')
+            except Exception as e:
+                logging.exception(f'Compaction failed, history was left unchanged.\nerror: {e}')
             
         return ChatResult(res_message, tokens_used, usage_percent)
 
     
     @classmethod
-    async def create(cls, client, model_key, system_prompt, tools, tool_runner):
-        self = cls(client, model_key, system_prompt, tools, tool_runner)
+    async def create(cls, client, model_key, system_prompt, settings, tools, tool_runner):
+        self = cls(client, model_key, system_prompt, settings, tools, tool_runner)
         await self._load_model_info()
         return self

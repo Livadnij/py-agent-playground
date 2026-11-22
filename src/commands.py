@@ -1,4 +1,6 @@
-# commands.py
+from src.utils import format_message
+
+
 async def cmd_help(client, args):
     for name, (handler, description) in COMMANDS.items():
         print(f'/{name} - {description}')
@@ -13,12 +15,10 @@ async def cmd_compact(client, args):
 
 
 async def cmd_exit(client, args):
-    return True  # tells the loop to stop
+    return True
 
 async def cmd_history(client, args):
-    history_lines_list = [f'{item['role']} : {item['content']}' for item in client.history]
-    history_transcript = '\n'.join(history_lines_list)
-    print(history_transcript)
+    print('\n'.join(format_message(item) for item in client.history))
 
 COMMANDS = {
     'help': (cmd_help, 'show this list'),
