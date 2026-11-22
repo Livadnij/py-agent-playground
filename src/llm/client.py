@@ -164,9 +164,6 @@ class LLMClient:
             iteration += 1
         else:
             raise ValueError('Tool round limit reached without a final answer')
-
-        self.history.extend(temp_messages)
-
         
         self.history.extend(temp_messages)
 
