@@ -1,6 +1,8 @@
 import inspect
 import typing
 
+from src.tools.context import ToolContext
+
 TOOLS = {}
 
 
@@ -21,8 +23,11 @@ def tool(description):
         required = []
 
         sig = inspect.signature(func)
+        needs_ctx = 'ctx' in sig.parameters
 
         for name, param in sig.parameters.items():
+            if param.annotation is ToolContext:
+                continue
             if typing.get_origin(param.annotation) is typing.Annotated:
                 raw_info = typing.get_args(param.annotation)
                 
@@ -56,7 +61,7 @@ def tool(description):
                 
             }
         }
-        TOOLS[func.__name__] = {"schema": schema, "function": func}
+        TOOLS[func.__name__] = {"schema": schema, "function": func, "needs_ctx": needs_ctx}
         return func
     
     return decorator

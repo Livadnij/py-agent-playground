@@ -5,7 +5,7 @@ from typing import Any
 from src.tools.registry import TOOLS
 
 
-async def tool_runner(allowed_tools: list[dict[str, Any]], tool_name: str, raw_args: str):
+async def tool_runner(ctx, allowed_tools: list[dict[str, Any]], tool_name: str, raw_args: str):
     allowed_tool_names = set((item['function']['name'] for item in allowed_tools))
 
     if (tool_name not in allowed_tool_names): return f"Tool with name '{tool_name}' does not exist"
@@ -15,6 +15,8 @@ async def tool_runner(allowed_tools: list[dict[str, Any]], tool_name: str, raw_a
         tool = TOOLS.get(tool_name)
     
         if tool:
+            if tool['needs_ctx']:
+                return str(await tool['function'](ctx, **args))
             return str(await tool['function'](**args))
         else:
             return f"Tool with name '{tool_name}' does not exist"

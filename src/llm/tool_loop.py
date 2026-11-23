@@ -1,3 +1,5 @@
+import asyncio
+
 from httpx import AsyncClient
 from typing import Any
 from collections.abc import Awaitable, Callable
@@ -65,17 +67,18 @@ async def run_tool_loop(
             {"role": "assistant", "content": res_message, "tool_calls": tool_calls}
         )
 
-        for call in tool_calls:
+        async def run_call(call):
             if repeated:
-                tool_result = (
-                    "You already made this exact call. Try something different."
-                )
-            else:
-                tool_result = await tool_runner(
-                    tools, call["function"]["name"], call["function"]["arguments"]
-                )
+                return "You already made this exact call. Try something different."
+            return await tool_runner(
+                tools, call["function"]["name"], call["function"]["arguments"]
+            )
+
+        results = await asyncio.gather(*(run_call(call) for call in tool_calls))
+
+        for call, result in zip(tool_calls, results):
             temp_messages.append(
-                {"role": "tool", "tool_call_id": call["id"], "content": tool_result}
+                {"role": "tool", "tool_call_id": call["id"], "content": result}
             )
 
         iteration += 1

@@ -33,6 +33,7 @@ class LLMClient:
         tool_runner: (
             Callable[[list[dict[str, Any]], str, str], Awaitable[str]] | None
         ) = None,
+        
     ):
         self.client = client
         self.model: Optional[LLMModel] = None
