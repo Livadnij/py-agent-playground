@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     LLM_COMPLETION_TEMPERATURE: float = 0.7
 
     LLM_MAX_TOOL_ROUNDS: int = 10
+    LLM_MAX_IDENTICAL_CALLS: int = 3
 
     LLM_MAX_FILE_SIZE: int = 8192
 
